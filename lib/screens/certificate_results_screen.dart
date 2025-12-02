@@ -1,9 +1,10 @@
 // lib/screens/certificate_results_screen.dart
 
 import 'package:flutter/material.dart';
-import 'package:url_launcher/url_launcher.dart';
 import '../api/api_service.dart';
 import '../models/certificate_model.dart';
+import 'pdf_viewer_screen.dart';
+import '../utils/file_downloader.dart';
 
 class CertificateResultsScreen extends StatelessWidget {
   final List<Certificate> certificates;
@@ -17,22 +18,6 @@ class CertificateResultsScreen extends StatelessWidget {
     required this.token,
   });
 
-  Future<void> _viewPdf(String fileUrl) async {
-    final apiService = ApiService();
-    final fullUrl = apiService.getPdfDownloadUrl(fileUrl);
-    
-    print('📄 Opening PDF: $fullUrl');
-    
-    if (await canLaunchUrl(Uri.parse(fullUrl))) {
-      await launchUrl(
-        Uri.parse(fullUrl),
-        mode: LaunchMode.externalApplication,
-      );
-    } else {
-      throw 'Could not launch $fullUrl';
-    }
-  }
-
   @override
   Widget build(BuildContext context) {
     return Scaffold(
@@ -41,6 +26,18 @@ class CertificateResultsScreen extends StatelessWidget {
         backgroundColor: Colors.blue.shade700,
         foregroundColor: Colors.white,
         elevation: 0,
+        actions: [
+          if (certificates.isNotEmpty)
+            IconButton(
+              icon: const Icon(Icons.download),
+              onPressed: () async {
+                for (var cert in certificates) {
+                  await _downloadCertificate(context, cert);
+                }
+              },
+              tooltip: 'Download All',
+            ),
+        ],
       ),
       body: certificates.isEmpty
           ? const Center(
@@ -63,10 +60,38 @@ class CertificateResultsScreen extends StatelessWidget {
                 final cert = certificates[index];
                 return CertificateCard(
                   certificate: cert,
-                  onViewPdf: () => _viewPdf(cert.fileUrl),
+                  onViewPdf: () => _viewPdf(context, cert),
+                  onDownloadPdf: () => _downloadCertificate(context, cert),
                 );
               },
             ),
+    );
+  }
+
+  void _viewPdf(BuildContext context, Certificate certificate) {
+    final apiService = ApiService();
+    final pdfUrl = apiService.getPdfDownloadUrl(certificate.fileUrl);
+    
+    Navigator.push(
+      context,
+      MaterialPageRoute(
+        builder: (context) => PdfViewerScreen(
+          pdfUrl: pdfUrl,
+          fileName: certificate.title,
+        ),
+      ),
+    );
+  }
+
+  Future<void> _downloadCertificate(BuildContext context, Certificate certificate) async {
+    final apiService = ApiService();
+    final pdfUrl = apiService.getPdfDownloadUrl(certificate.fileUrl);
+    final fileName = '${certificate.uin}_${certificate.title}';
+    
+    await FileDownloader.downloadPdf(
+      url: pdfUrl,
+      fileName: fileName,
+      context: context,
     );
   }
 }
@@ -74,11 +99,13 @@ class CertificateResultsScreen extends StatelessWidget {
 class CertificateCard extends StatelessWidget {
   final Certificate certificate;
   final VoidCallback onViewPdf;
+  final VoidCallback onDownloadPdf;
 
   const CertificateCard({
     super.key,
     required this.certificate,
     required this.onViewPdf,
+    required this.onDownloadPdf,
   });
 
   @override
@@ -157,12 +184,12 @@ class CertificateCard extends StatelessWidget {
               children: [
                 Expanded(
                   child: ElevatedButton.icon(
-                    icon: const Icon(Icons.picture_as_pdf, size: 20),
+                    icon: const Icon(Icons.remove_red_eye, size: 20),
                     label: const Text(
-                      'View PDF Certificate',
+                      'View PDF',
                       style: TextStyle(fontSize: 16),
                     ),
-                    onPressed: certificate.fileUrl.isNotEmpty ? onViewPdf : null,
+                    onPressed: onViewPdf,
                     style: ElevatedButton.styleFrom(
                       backgroundColor: Colors.blue.shade700,
                       foregroundColor: Colors.white,
@@ -174,16 +201,56 @@ class CertificateCard extends StatelessWidget {
                   ),
                 ),
                 const SizedBox(width: 10),
-                if (certificate.fileUrl.isNotEmpty)
-                  IconButton(
-                    icon: const Icon(Icons.download, size: 24),
-                    onPressed: onViewPdf,
-                    tooltip: 'Download PDF',
-                    style: IconButton.styleFrom(
-                      backgroundColor: Colors.grey.shade100,
-                      padding: const EdgeInsets.all(12),
+                Expanded(
+                  child: ElevatedButton.icon(
+                    icon: const Icon(Icons.download, size: 20),
+                    label: const Text(
+                      'Download',
+                      style: TextStyle(fontSize: 16),
+                    ),
+                    onPressed: onDownloadPdf,
+                    style: ElevatedButton.styleFrom(
+                      backgroundColor: Colors.green.shade700,
+                      foregroundColor: Colors.white,
+                      padding: const EdgeInsets.symmetric(vertical: 14),
+                      shape: RoundedRectangleBorder(
+                        borderRadius: BorderRadius.circular(10),
+                      ),
                     ),
                   ),
+                ),
+              ],
+            ),
+            
+            const SizedBox(height: 10),
+            
+            // Quick Actions Row
+            Row(
+              mainAxisAlignment: MainAxisAlignment.spaceEvenly,
+              children: [
+                IconButton(
+                  icon: const Icon(Icons.share),
+                  onPressed: () {
+                    _shareCertificate(context);
+                  },
+                  tooltip: 'Share',
+                ),
+                IconButton(
+                  icon: const Icon(Icons.print),
+                  onPressed: () {
+                    ScaffoldMessenger.of(context).showSnackBar(
+                      const SnackBar(content: Text('Print option coming soon')),
+                    );
+                  },
+                  tooltip: 'Print',
+                ),
+                IconButton(
+                  icon: const Icon(Icons.info),
+                  onPressed: () {
+                    _showCertificateInfo(context);
+                  },
+                  tooltip: 'Info',
+                ),
               ],
             ),
           ],
@@ -214,6 +281,46 @@ class CertificateCard extends StatelessWidget {
               value,
               style: const TextStyle(fontSize: 16),
             ),
+          ),
+        ],
+      ),
+    );
+  }
+
+  void _shareCertificate(BuildContext context) {
+    ScaffoldMessenger.of(context).showSnackBar(
+      SnackBar(
+        content: const Text('Sharing certificate...'),
+        action: SnackBarAction(
+          label: 'OK',
+          onPressed: () {},
+        ),
+      ),
+    );
+  }
+
+  void _showCertificateInfo(BuildContext context) {
+    showDialog(
+      context: context,
+      builder: (context) => AlertDialog(
+        title: const Text('Certificate Information'),
+        content: Column(
+          mainAxisSize: MainAxisSize.min,
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Text('Title: ${certificate.title}'),
+            const SizedBox(height: 8),
+            Text('Status: ${certificate.status}'),
+            const SizedBox(height: 8),
+            Text('Issued: ${certificate.formattedDate}'),
+            const SizedBox(height: 8),
+            Text('ID: ${certificate.id}'),
+          ],
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(context),
+            child: const Text('Close'),
           ),
         ],
       ),
